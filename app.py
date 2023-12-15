@@ -26,11 +26,10 @@ def login():
         username = data.get('username')
         password = data.get('password')
 
-        global cl
         cl = Client()
         cl.login(username, password)
 
-        return jsonify({'message': 'Login successful'}), 200
+        return jsonify({'cl_token': cl}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
