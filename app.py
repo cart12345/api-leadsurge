@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from instagrapi import Client
 import time
 import random
+import uuid
+import os
 
 app = FastAPI()
 
@@ -15,9 +17,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Global Instagram client instance
-cl = None
 
 # Delay functions
 
@@ -41,23 +40,29 @@ class LoginData(BaseModel):
 class ScrapeData(BaseModel):
     target: str
     amount: int
+    uuid: str
 
 
 class DMData(BaseModel):
     usernames: list[str]
     mesg: str
     cmt: str
+    uuid: str
 
 # Login endpoint
 
-
 @app.post("/login")
 def login(data: LoginData):
-    global cl
     try:
         cl = Client()
         cl.login(data.username, data.password)
-        return {"message": "Login successful"}
+        generated_uuid = uuid.uuid4()
+
+        cl.dump_settings(f"data/{generated_uuid}.json")
+        user = cl.user_info_by_username(data.username)
+
+        return {"user_id": user.pk, "pfp_url": user.profile_pic_url_hd, "uuid": generated_uuid}
+    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -66,11 +71,16 @@ def login(data: LoginData):
 
 @app.post("/scrape_followers")
 def scrape_followers(data: ScrapeData):
-    if cl is None:
-        raise HTTPException(status_code=400, detail="You need to login first")
-
     try:
+        cl = Client()
+
+        if not os.path.exists("data"):
+            os.makedirs("data")
+
+        cl.load_settings(f"data/{data.uuid}.json")
+
         user_info = cl.user_info_by_username(data.target)
+
         if user_info is None:
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -79,6 +89,7 @@ def scrape_followers(data: ScrapeData):
 
         scraped_usernames = [cl.user_info(
             follower_id).username for follower_id in followers if cl.user_info(follower_id)]
+        
         return {"usernames": scraped_usernames}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -88,10 +99,10 @@ def scrape_followers(data: ScrapeData):
 
 @app.post("/scrape_following")
 def scrape_following(data: ScrapeData):
-    if cl is None:
-        raise HTTPException(status_code=400, detail="You need to login first")
-
     try:
+        cl = Client()
+        cl.load_settings(f"data/{data.uuid}.json")
+
         user_info = cl.user_info_by_username(data.target)
         if user_info is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -110,10 +121,10 @@ def scrape_following(data: ScrapeData):
 
 @app.post("/send_dms")
 def send_dms(data: DMData):
-    if cl is None:
-        raise HTTPException(status_code=400, detail="You need to login first")
-
     try:
+        cl = Client()
+        cl.load_settings(f"data/{data.uuid}.json")
+
         max_dms = 10
         dms_sent = 0
         sent_dms = []
@@ -150,9 +161,3 @@ def send_dms(data: DMData):
         return {"message": "DMs sent successfully", "sent_dms": sent_dms}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# Run the server
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8080)
